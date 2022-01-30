@@ -11,9 +11,8 @@ import matplotlib.pyplot as plt
 from scipy import stats
 from currency_converter import CurrencyConverter
 from datetime import date
-from sklearn.feature_selection import SelectKBest
-from sklearn.feature_selection import chi2
 from sklearn import preprocessing
+
 
 
 class Data():
@@ -254,8 +253,6 @@ class Transaction_Data(Data):
         self.update()
         
 
-
-
 def extract_profit(df):
     total_cost = df['MATERIAL_COST']+df['SERVICE_COST']
     return ((df['OFFER_PRICE']-total_cost)*100)/total_cost
@@ -291,10 +288,7 @@ if __name__ == '__main__':
     #test_data = Data(df=trans_data.df[trans_data.df['TEST_SET_ID'].isnull()==False], name='test_data')
     # save test data.
     #test_data.save_csv('data/test_data.csv', index=False)
-    # delete test data from transaction data
-    #trans_data.df = trans_data.df[trans_data.df['TEST_SET_ID'].isnull()]
-    # drop test_set_id column
-    trans_data.drop(columns=['TEST_SET_ID'])
+
     #trans_data.data_summary()
     trans_data.fix_customer_column()
     trans_data.convert_col_datatype("CUSTOMER", dtype=int)
@@ -328,7 +322,7 @@ if __name__ == '__main__':
     
     merged_data = Data(df=pd.merge(left=trans_data.df, right=customer_data.df, on='CUSTOMER',suffixes=('','_y')), name='merged_df')
     merged_data.drop(columns=['COUNTRY_y'])
-    # add unknown customer transactions to the merge data frame
+    # add unknown customer transactions to merge the dataframe
     for col in customer_data.columns:
         if col =='COUNTRY' or col=='CUSTOMER':
             continue
@@ -338,8 +332,6 @@ if __name__ == '__main__':
     
     # save merged data
     merged_data.save_csv('data/training_data/merged_data.csv')
-    
-    
     
     
     ''' 2) _____________________DATA PREPARATION_____________________ '''
@@ -402,6 +394,7 @@ if __name__ == '__main__':
     
     # Currincies: ['Chinese Yuan', 'Pound Sterling', 'Euro', 'US Dollar']
 
+    # Use CurrencyConverter for make it easy.
     c = CurrencyConverter(fallback_on_wrong_date=True, fallback_on_missing_rate=True)
     currency_mapper = {'Chinese Yuan':'CNY', 'Pound Sterling':'GBP', 'US Dollar':'USD'}
     for idx, (year, currency, rev, rev_1, rev_2) in enumerate(merged_data.df[['CREATION_YEAR','CURRENCY',
@@ -431,6 +424,7 @@ if __name__ == '__main__':
     merged_data.drop(columns=drop_cols)
     
     ''' 3) _____________________FEATURE EXTRACTION/SELECTION_____________________ '''
+    
     # feature 1: Customer rev. Growth Rate.
     # Growth rate(EndVal-BeginVal)/BeginVal
     merged_data.df['CUSTOMER_GROWTH'] = extract_growth(merged_data.df)
@@ -445,10 +439,10 @@ if __name__ == '__main__':
     
     # delete negative cols.
     merged_data.df = merged_data.df[merged_data.df['CUSTOMER_HOW_LONG']>=0]
-    # delete cols
+    # delete some cols
     merged_data.drop(columns=['CREATION_YEAR', 'MO_CREATED_DATE'])
     
-    # feature 4: Which one is costly Meterial or service
+    # feature 4: Which one is costly- Meterial or service?
     merged_data.df['SERVICE_COSTLY'] = list(map(lambda x: 1 if x>0 else 0, list(merged_data.df['SERVICE_COST'] - merged_data.df['MATERIAL_COST'])))
     
     
@@ -471,23 +465,93 @@ if __name__ == '__main__':
     merged_data.df = pd.get_dummies(merged_data.df, columns=cols)
     
     # binerize label
-    
     lb = preprocessing.LabelBinarizer()
     merged_data.df['COUNTRY'] = lb.fit_transform(merged_data.df['COUNTRY'])
-
     
-    # For numeric input, use ANOVA
-    # categorical feature selection
-    # use Chi-Squared Statistic for categoric input
+    # split test data set and save it.
+    test_data = Data(df=merged_data.df[merged_data.df['TEST_SET_ID'].isnull()==False], name='test_data')
+    # save test data.
+    test_data.save_csv('data/test_data.csv', index=False)
     
-    #fs = SelectKBest(score_func=chi2, k='all')
-    #y = merged_data.df[['OFFER_STATUS']]
-    #X = merged_data.df.drop(['OFFER_STATUS'],axis=1)
-    #fs.fit(X, y)
+    # delete test data from merged data
+    merged_data.df = merged_data.df[merged_data.df['TEST_SET_ID'].isnull()]
+    # drop test_set_id column
+    merged_data.drop(columns=['TEST_SET_ID'])
+    # split merged data as depentent and indepentent variable.
+  
+    y = merged_data.df[['OFFER_STATUS']]
+    X = merged_data.df.drop(['OFFER_STATUS'], axis=1)
+   
     
-    # save merged_data
-    #merged_data.save_csv(path='data/training_data/final_data.csv')
+    # manually encode depentent variable values. 1: won , 0: 
+    y['OFFER_STATUS'] = y['OFFER_STATUS'].apply(lambda x: 1 if x=='won' else 0)
     
+    # we have 92 feature for X, we can reduce it.
+    ''' **Lets do feature selection** '''
+    # reference -> https://machinelearningmastery.com/feature-selection-with-real-and-categorical-data/
+    # check correlation matrix again.
+    corr = X.corr() # looks nice
+    
+    ''' For numeric input-categorical output we can use ANOVA.'''
+    # Let's first differentiate categorical and numeric data
+    numeric_columns = ['OFFER_PRICE', 'COSTS_PRODUCT_A', 'COSTS_PRODUCT_B', 
+                       'COSTS_PRODUCT_C', 'COSTS_PRODUCT_D', 'COSTS_PRODUCT_E', 
+                       'N_SUB_OFFER','REV_CURRENT_YEAR', 'REV_CURRENT_YEAR.2','CUSTOMER_GROWTH',
+                       'PROFIT', 'CUSTOMER_HOW_LONG']
+    numeric_data_x = X[numeric_columns]
+    categorical_data_x = X.drop(numeric_columns, axis=1)
+    
+    # Min-max normalization before run ANOVA test with numeric data
+    Min_Max_Scaler = preprocessing.MinMaxScaler()
+    numeric_data_x = pd.DataFrame(Min_Max_Scaler.fit_transform(numeric_data_x), columns=numeric_columns)
+    # apply Anova Test with SelectKBest.
+    from sklearn.feature_selection import SelectKBest
+    from sklearn.feature_selection import f_classif
+    anova_fs = SelectKBest(score_func=f_classif, k=11)
+    anova_fs.fit(numeric_data_x, y)
+    selected_cols = anova_fs.get_support(indices=True)
+    selected_numeric_data_x = numeric_data_x.iloc[:, selected_cols]
+    # find un-selected columns by anova test
+    unwanted_cols_anova = list(set(numeric_data_x) - set(selected_numeric_data_x.columns))
+    # for now, just keep all numeric data in the X.
+    anova_scores = anova_fs.scores_
+    # score for PROFIT is too low, we can delete this feature, to do this, set k=11.
+    
+    ''' For categorical input-categorical output we can use Chi-Squared Statistic'''
+    from sklearn.feature_selection import chi2
+    chi_fs = SelectKBest(score_func=chi2, k='all')
+    chi_fs.fit(categorical_data_x, y)
+    # check for scores
+    chi_scores = chi_fs.scores_
+    # plot scores to determine param k for SelectKBest
+    # plot the scores
+    plt.bar([i for i in range(len(chi_scores))], chi_scores)
+    # plot threshold
+    th = [10 for i in range(len(chi_scores))] # threshold 10 looks nice
+    plt.plot(np.arange(len(chi_scores)),th, color='red')
+    plt.show()
+    # delete all features which score is lower than th
+    number_of_features_to_delete = np.sum(np.where(chi_scores < th, 1, 0))
+    # we can delete like 43 features, so set param k = 80-43=37
+    chi_fs = SelectKBest(score_func=chi2, k=37)
+    chi_fs.fit(categorical_data_x, y)
+    selected_cols = chi_fs.get_support(indices=True)
+    selected_categorical_data_x = categorical_data_x.iloc[:, selected_cols]
+    # find un-selected columns by chi square test
+    unwanted_cols_chi = list(set(categorical_data_x) - set(selected_categorical_data_x.columns))
+    
+    # Rearrange indepentent variable X with selected columns.
+    cols_to_delete = unwanted_cols_anova + unwanted_cols_chi
+    X = X.drop(cols_to_delete, axis=1)
+    
+    
+    ''' 4) _____________________MODELING_____________________ '''
+    #%%
+    # Let's do train-validation split first.
+    # before doing split, lets check our target variables frequencies
+    print(y.value_counts())  # target variables are not homogenous.
+    # 1               16818
+    # 0                3753
     
     
     
