@@ -2,3 +2,5 @@
 /venv
 /.spyproject
 /BA_ML_NOTES
+*.csv
+*.pdf
