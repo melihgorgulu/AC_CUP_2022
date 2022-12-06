@@ -4,7 +4,7 @@ Created on Wed Jan 19 15:23:22 2022
 
 @author: Melih
 
-GITHUB REPO FOR THIS PROJECT : https://github.com/melburmer/AC_CUP_2022
+GITHUB REPO FOR THIS PROJECT : https://github.com/melihgorgulu/AC_CUP_2022
 
 """
 # Importing Libraries
